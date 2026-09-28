@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>불멸의 7년: 임진왜란 시뮬레이터 2</title>
+<meta name="description" content="임진왜란 8대 전투를 체험하는 크롬북용 학습 게임">
+<!-- 한글 폰트 (인터넷이 연결된 곳에서만 예쁜 글꼴이 적용됩니다. 인터넷이 없어도 앱은 정상 작동합니다) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&family=Noto+Serif+KR:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app"><!-- 자바스크립트가 이 안에 화면을 그립니다 --></div>
+
+<!-- ============================================================
+     스크립트 로딩 순서가 중요합니다. 아래 순서를 바꾸지 마세요.
+     1) 설정 → 2) 데이터 → 3) 이미지/프레임/스프라이트 →
+     4) 지도 → 5) 미니게임 → 6) 서버 통신 → 7) 앱 로직(app.js, 항상 마지막)
+     ============================================================ -->
+<script src="js/config.js"></script>
+<script src="js/data.js"></script>
+<script src="js/images.js"></script>
+<script src="js/frames.js"></script>
+<script src="js/sprites.js"></script>
+<script src="js/map.js"></script>
+<script src="js/games1.js"></script>
+<script src="js/games2.js"></script>
+<script src="js/sync.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
