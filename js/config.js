@@ -6,7 +6,7 @@
    ============================================================ */
 const CONFIG = {
   // 예: "https://script.google.com/macros/s/AKfycbx.../exec"
-  APPS_SCRIPT_URL: "",
+  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbwWAhLY5E5VbjrEHHnvZMxxI1bbi5_M3mE71UCK0LDXLMv080ZNLno7wyKAHdclUSV6/exec",
 
   // 반/학교 이름 (보고서 상단에 표시됩니다. 비워두면 표시하지 않습니다)
   SCHOOL_NAME: "",
