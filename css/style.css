@@ -423,3 +423,49 @@ p { line-height: 1.6; }
   .cut .l0, .cut .l0b, .cut .l1, .cut .l2, .cut .l2b, .cut .l3 { animation-duration: .01s !important; animation-delay: 0s !important; }
 }
 @media print { .rp-cards .chip { border-color: #999; color: #111; } }
+
+/* ============================================================
+   imjin-war-game2 추가: 조작 버튼 상태, 중간 사건, 최종 점검 퀴즈
+   ============================================================ */
+.ctl .lbl { display: block; }
+.ctl.active { background: rgba(127, 183, 164, .25); border-color: var(--cel); }
+
+/* 중간 사건 (강화 협상 · 정유재란) */
+.tag.ev { background: rgba(196, 67, 47, .2); color: #FFB3A3; border-color: rgba(196, 67, 47, .5); }
+.ev-scroll h2 { margin-bottom: 6px; }
+.ev-dots { display: flex; gap: 6px; align-items: center; margin: 4px 0 18px; }
+.ev-dots i { width: 22px; height: 5px; border-radius: 3px; background: rgba(233, 237, 230, .15); font-style: normal; }
+.ev-dots i.done { background: var(--cel); }
+.ev-dots i.now { background: var(--gold2); }
+.ev-dots i.qd { width: auto; height: auto; padding: 0 7px; font-size: .72rem; line-height: 16px; color: var(--por-dim); background: rgba(233, 237, 230, .08); }
+.ev-dots i.qd.now { background: var(--gold2); color: #1a1a1a; }
+.ev-scene { animation: evIn .45s ease both; border-left: 3px solid rgba(196, 67, 47, .6); padding: 2px 0 2px 16px; }
+.ev-scene h3 { font-family: 'Noto Serif KR', serif; font-size: 1.15rem; color: var(--gold2); margin: 0 0 8px; }
+.ev-scene p { line-height: 1.75; }
+@keyframes evIn { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+.tl-node.ev { flex: .9; font-size: .68rem; border: 1px dashed rgba(196, 67, 47, .45); }
+.tl-node.ev.now { background: rgba(196, 67, 47, .22); color: #FFB3A3; }
+.rp-table tr.ev-row td { background: rgba(196, 67, 47, .07); }
+.rp-table tr.ev-row td:first-child { font-size: .7rem; color: #FFB3A3; white-space: nowrap; }
+
+/* 최종 점검 퀴즈 */
+.fq-wrap { flex: 1; display: flex; justify-content: center; align-items: flex-start; padding: 30px 4vw 60px; }
+.fq { max-width: 680px; }
+.fq-prog { display: flex; gap: 6px; margin: 2px 0 16px; }
+.fq-prog i { flex: 1; height: 6px; border-radius: 3px; background: rgba(233, 237, 230, .12); }
+.fq-prog i.now { background: var(--gold2); }
+.fq-prog i.ok { background: var(--cel); }
+.fq-prog i.no { background: var(--cin); }
+.fq-n { font-size: .82rem; margin: 0 0 4px; }
+.fq-card { display: flex; gap: 14px; align-items: center; margin-top: 10px; }
+.fq-card p { margin: 0; font-size: .88rem; line-height: 1.6; }
+.fq-score { font-size: 1.1rem; color: var(--por); margin: 14px 0; }
+.fq-score b { font-size: 2.4rem; color: var(--gold2); font-family: 'Noto Serif KR', serif; }
+.fq-score span { margin-left: 10px; color: var(--cel); font-weight: 700; }
+.fq-list { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
+.fq-list li { padding: 8px 12px; border-radius: 8px; background: rgba(233, 237, 230, .05); color: var(--por-dim); }
+.fq-list li i { font-style: normal; font-weight: 900; margin-right: 10px; }
+.fq-list li.ok i { color: var(--cel); }
+.fq-list li.no i { color: #FF9A88; }
+@media (max-width: 560px) { .fq-card { flex-direction: column; align-items: flex-start; } }
+@media (prefers-reduced-motion: reduce) { .ev-scene { animation: none; } }

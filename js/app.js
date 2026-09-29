@@ -15,16 +15,26 @@ const store = {
   del(k) { delete mem[k]; try { if (storeOK) localStorage.removeItem(k); } catch (e) { } }
 };
 const SAVE_KEY = 'imjin_war_save_v2';
-function saveGame() { store.set(SAVE_KEY, { v: 2, player: G.player, results: G.results, essay: G.essay, startedAt: G.startedAt, finishedAt: G.finishedAt, submitted: G.submitted }); }
+function saveGame() { store.set(SAVE_KEY, { v: 2, player: G.player, results: G.results, events: G.events, finalQuiz: G.finalQuiz, essay: G.essay, startedAt: G.startedAt, finishedAt: G.finishedAt, submitted: G.submitted }); }
 function loadGame() { return store.get(SAVE_KEY); }
 
 const G = {
   player: { sid: '', name: '' }, stage: 0, phase: 'TITLE',
   results: Array(8).fill(null), retryUsed: Array(8).fill(false),
+  events: {}, finalQuiz: null,           // 중간 사건 판단 결과, 엔딩 뒤 최종 점검 퀴즈 결과
   essay: '', submitted: false,
   startedAt: 0, finishedAt: 0, pick: null, order: []
 };
-function totalScore() { return G.results.reduce((a, r) => a + (r ? r.total : 0), 0); }
+function eventScore() { return Object.values(G.events || {}).reduce((a, e) => a + (e ? e.bonus : 0), 0); }
+function totalScore() { return G.results.reduce((a, r) => a + (r ? r.total : 0), 0) + eventScore() + (G.finalQuiz ? G.finalQuiz.bonus : 0); }
+/* 다음에 보여 줄 화면: 끝나지 않은 전투 → (행주 뒤) 사건 → 최종 퀴즈 → 보고서 */
+function resumeNext() {
+  const next = G.results.findIndex(r => !r);
+  if (next > EVENT_AFTER_STAGE || next === -1) { const ev = EVENTS.findIndex(e => !G.events[e.id]); if (ev !== -1) return showEvent(ev); }
+  if (next !== -1) return goStage(next);
+  if (!G.finalQuiz) return showFinalQuiz();
+  showReport();
+}
 
 /* ---------- 인물·유물 카드 도감 (처음부터 다시 해도 사라지지 않도록 따로 저장) ---------- */
 const CARD_KEY = 'imjin_cards_v1';
@@ -82,7 +92,9 @@ function bindTopBar() {
   const a = $('#tb-admin'); if (a) a.onclick = openAdmin;
 }
 function timelineHTML() {
-  return `<div class="timeline">${STAGES.map((s, i) => `<div class="tl-node ${G.results[i] ? 'done' : (i === G.stage && G.phase !== 'TITLE' && G.phase !== 'REPORT' ? 'now' : '')}">${esc(s.short)}</div>`).join('')}</div>`;
+  const evDone = EVENTS.every(e => G.events[e.id]), evNow = G.phase === 'EVENT';
+  return `<div class="timeline">${STAGES.map((s, i) => `<div class="tl-node ${G.results[i] ? 'done' : (i === G.stage && G.phase !== 'TITLE' && G.phase !== 'REPORT' && !evNow ? 'now' : '')}">${esc(s.short)}</div>` +
+    (i === EVENT_AFTER_STAGE ? `<div class="tl-node ev ${evDone ? 'done' : (evNow ? 'now' : '')}">강화·정유재란</div>` : '')).join('')}</div>`;
 }
 function mapPane() { return `<div class="map-panel"><div id="map-mount"></div><div id="map-caption" class="map-caption">${esc(STAGES[G.stage].summary)}</div></div>`; }
 function mountMapIfPresent(animate) { const el = $('#map-mount'); if (el) { MapView.mount(el); MapView.update(G.stage, animate); } }
@@ -128,16 +140,16 @@ function showTitle() {
     e.preventDefault();
     G.player = { sid: $('#f-sid').value.trim(), name: $('#f-name').value.trim() };
     if (!G.player.sid || !G.player.name) return;
-    G.results = Array(8).fill(null); G.retryUsed = Array(8).fill(false); G.essay = ''; G.submitted = false;
+    G.results = Array(8).fill(null); G.retryUsed = Array(8).fill(false); G.events = {}; G.finalQuiz = null; G.essay = ''; G.submitted = false;
     G.startedAt = Date.now(); G.finishedAt = 0; saveGame(); goStage(0);
   };
   const rb = $('#resume-btn');
   if (rb) rb.onclick = () => {
     G.player = saved.player; G.results = saved.results; G.retryUsed = Array(8).fill(false);
+    G.events = saved.events || {}; G.finalQuiz = saved.finalQuiz || null;
     G.essay = saved.essay || ''; G.submitted = !!saved.submitted;
     G.startedAt = saved.startedAt; G.finishedAt = saved.finishedAt;
-    const next = G.results.findIndex(r => !r);
-    if (next === -1) showReport(); else goStage(next);
+    resumeNext();
   };
 }
 function goStage(i) { G.stage = i; G.phase = 'BRIEFING'; showBriefing(); }
@@ -191,7 +203,7 @@ function showIntro() {
 function controlsHTML(game) {
   const c = game.controls;
   if (c.kind === 'fire') return `<button class="ctl" id="ctl-fire" data-a="fire"><span class="cd"></span><span class="lbl">${esc(c.fire || '발포')}</span><small>${esc(c.hint || '')}</small></button>`;
-  if (c.kind === 'dual') return `<button class="ctl" id="ctl-rocket" data-a="rocket"><span class="cd"></span>신기전 발사<small>먼 곳의 적을 한꺼번에</small></button><button class="ctl" id="ctl-stone" data-a="stone"><span class="cd"></span>돌 던지기<small>가까운 적 2명</small></button>`;
+  if (c.kind === 'dual') return `<button class="ctl" id="ctl-rocket" data-a="rocket"><span class="cd"></span><span class="lbl">신기전 발사</span><small>먼 곳의 적을 한꺼번에</small></button><button class="ctl" id="ctl-stone" data-a="stone"><span class="cd"></span><span class="lbl">돌 던지기</span><small>가장 가까운 적 1명 (방패도)</small></button>`;
   if (c.kind === 'steer') return `<button class="ctl" data-a="left" aria-label="왼쪽으로 조타"><i class="ctl-arrow l"></i></button><button class="ctl" data-a="right" aria-label="오른쪽으로 조타"><i class="ctl-arrow r"></i></button>`;
   return `<p class="ctl-hint">${esc(c.hint || '')}</p>`;
 }
@@ -227,7 +239,11 @@ const Engine = {
     for (const k of ['fire', 'rocket', 'stone']) { const b = $('#ctl-' + k); if (b && ui[k] != null) b.style.setProperty('--cd', clamp(ui[k], 0, 1)); }
     // 게임 단계에 따라 버튼 글자가 바뀌는 경우 (예: 한산도 1단계 "뒤로 물러나기" → 2단계 "학익진 전개!")
     if (ui.label != null) { const l = $('#ctl-fire .lbl'); if (l && l.textContent !== ui.label) l.textContent = ui.label; }
-    if (ui.sub != null) { const s = $('#ctl-fire small'); if (s && s.textContent !== ui.sub) s.textContent = ui.sub; }
+    if (ui.sub != null && typeof ui.sub === 'string') { const s = $('#ctl-fire small'); if (s && s.textContent !== ui.sub) s.textContent = ui.sub; }
+    // 버튼이 여러 개인 경우: ui.lbl / ui.sub 에 { rocket: '...', stone: '...' } 처럼 버튼별 글자를 줍니다
+    if (ui.lbl && typeof ui.lbl === 'object') for (const k in ui.lbl) { const l = $(`#ctl-${k} .lbl`); if (l && l.textContent !== ui.lbl[k]) l.textContent = ui.lbl[k]; }
+    if (ui.sub && typeof ui.sub === 'object') for (const k in ui.sub) { const s = $(`#ctl-${k} small`); if (s && s.textContent !== ui.sub[k]) s.textContent = ui.sub[k]; }
+    if (ui.on && typeof ui.on === 'object') for (const k in ui.on) { const b = $('#ctl-' + k); if (b) b.classList.toggle('active', !!ui.on[k]); }
   },
   stop() { this.running = false; cancelAnimationFrame(this.raf); this.pressed = false; if (this.game && this.game.action) ['left', 'right'].forEach(n => this.game.action(n, false)); },
   cancel() { this.stop(); this.game = null; this.onEnd = null; }
@@ -298,11 +314,11 @@ function showResult() {
     <div class="kw"><div class="kw-h">학습지 핵심 키워드 획득</div><dl><dt>전투</dt><dd>${esc(st.worksheetDate)} · ${esc(kw.battle)}</dd><dt>지휘관</dt><dd>${esc(kw.who)}</dd><dt>의의</dt><dd>${esc(kw.meaning)}</dd></dl></div>
     <p class="sum">${esc(st.summary)}</p>
     ${st.keyFactor ? `<div class="factor"><b>핵심 승리 요인 ${st.keyFactor.n}. ${esc(st.keyFactor.title)}</b><br>${esc(st.keyFactor.text)}</div>` : ''}
-    <div class="actions">${G.retryUsed[i] ? '' : `<button class="btn ghost" id="retry">다시 도전 (1회, 더 높은 점수로 기록)</button>`}<button class="btn primary" id="go">${last ? '마지막 장면 보기' : '다음 전투로'}</button></div>
+    <div class="actions">${G.retryUsed[i] ? '' : `<button class="btn ghost" id="retry">다시 도전 (1회, 더 높은 점수로 기록)</button>`}<button class="btn primary" id="go">${last ? '마지막 장면 보기' : (i === EVENT_AFTER_STAGE && EVENTS.some(e => !G.events[e.id]) ? '다음 사건으로' : '다음 전투로')}</button></div>
   </article></div></div>${timelineHTML()}`);
   mountMapIfPresent();
   bindCards($('.rc-cards'));
-  $('#go').onclick = () => last ? showCutscene() : goStage(i + 1); $('#go').focus();
+  $('#go').onclick = () => last ? showCutscene() : (i === EVENT_AFTER_STAGE ? resumeNext() : goStage(i + 1)); $('#go').focus();
   const rt = $('#retry'); if (rt) rt.onclick = () => { G.retryUsed[i] = true; startMini(); };
 }
 function showCutscene() {
@@ -313,8 +329,97 @@ function showCutscene() {
     <div class="l1">"싸움이 급하니<br>나의 죽음을 알리지 말라."</div>
     <div class="l2">이순신의 마지막 말 · 『징비록』, 『이충무공행록』</div>
     <div class="l2b">장군의 죽음은 전투가 끝날 때까지 알려지지 않았고, 7년 전쟁은 끝이 났다.</div>
-    <div class="l3"><button class="btn primary" id="cut-go">전적 기록부 보기</button></div></div></div>`);
-  $('#cut-go').onclick = showReport;
+    <div class="l3"><button class="btn primary" id="cut-go">${G.finalQuiz ? '전적 기록부 보기' : '최종 점검 퀴즈 풀기'}</button></div></div></div>`);
+  $('#cut-go').onclick = () => G.finalQuiz ? showReport() : showFinalQuiz();
+}
+
+/* ---------- 중간 사건: 강화 협상 → 정유재란 (행주대첩과 명량해전 사이) ---------- */
+const shuffle = (arr) => arr.map(v => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map(v => v[1]);
+function showEvent(idx) {
+  const ev = EVENTS[idx]; G.phase = 'EVENT'; G.stage = EVENT_AFTER_STAGE;
+  let k = 0;
+  const frame = (inner) => {
+    root(`${topBar(false)}<div class="pane-wrap">${mapPane()}<div class="main-panel"><article class="scroll ev-scroll">
+      <div class="scroll-meta"><span class="tag ev">${esc(ev.tag)}</span><span class="tag">${esc(ev.date)}</span><span class="tag">${esc(ev.who)}</span></div>
+      <h2>${esc(ev.title)}</h2>
+      <div class="ev-dots">${ev.scenes.map((_, j) => `<i class="${j < k ? 'done' : (j === k ? 'now' : '')}"></i>`).join('')}<i class="qd ${k >= ev.scenes.length ? 'now' : ''}">?</i></div>
+      ${inner}
+    </article></div></div>${timelineHTML()}`);
+    mountMapIfPresent();
+    const cap = $('#map-caption'); if (cap) cap.textContent = `${ev.title} — ${ev.meaning}`;
+  };
+  const scene = () => {
+    const sc = ev.scenes[k], lastScene = k === ev.scenes.length - 1;
+    frame(`<section class="ev-scene"><h3>${esc(sc.h)}</h3><p>${esc(sc.p)}</p>${sc.source ? sourceHTML(sc.source) : ''}</section>
+      <div class="actions">${k > 0 ? '<button class="btn ghost" id="ev-back">이전 장면</button>' : ''}<button class="btn primary" id="ev-next">${lastScene ? '판단해 보기' : '다음 장면'}</button></div>`);
+    const b = $('#ev-back'); if (b) b.onclick = () => { k--; scene(); };
+    $('#ev-next').onclick = () => { k++; if (k < ev.scenes.length) scene(); else quiz(); };
+    $('#ev-next').focus();
+  };
+  const quiz = () => {
+    const q = ev.quiz, order = shuffle(q.options.map((_, i) => i));
+    frame(`<div class="scroll-meta"><span class="tag gold">사건 판단 · 맞히면 +${EVENT_BONUS}점</span></div>
+      <h2 class="q">${esc(q.question)}</h2>
+      <div class="opts">${order.map((oi, j) => `<button class="opt" data-j="${j}"><span class="opt-n">${CIRC[j]}</span><span>${esc(q.options[oi].text)}</span></button>`).join('')}</div>`);
+    document.querySelectorAll('.opt').forEach(btn => btn.onclick = () => {
+      const j = +btn.dataset.j, opt = q.options[order[j]], ok = !!opt.correct;
+      document.querySelectorAll('.opt').forEach((b2, i) => { b2.disabled = true; const o = q.options[order[i]]; b2.classList.add(o.correct ? 'right' : (i === j ? 'wrong' : 'dim')); });
+      G.events[ev.id] = { ok, bonus: ok ? EVENT_BONUS : 0 }; saveGame();
+      const tb = $('.tb-score b'); if (tb) tb.textContent = fmt(totalScore());
+      const fb = document.createElement('div'); fb.className = 'fb' + (ok ? '' : ' bad');
+      fb.innerHTML = ok ? `<b>정확한 판단입니다! +${EVENT_BONUS}점</b>${esc(opt.comment)}` : `<b>실제 역사에서는 이랬어요</b>${esc(opt.comment)}`;
+      const nextEv = EVENTS.findIndex(e => !G.events[e.id]);
+      const act = document.createElement('div'); act.className = 'actions';
+      act.innerHTML = `<button class="btn primary" id="ev-go">${nextEv !== -1 ? '다음 사건으로' : `${esc(STAGES[EVENT_AFTER_STAGE + 1].title)}으로`}</button>`;
+      const sc = $('.scroll'); sc.appendChild(fb); sc.appendChild(act);
+      $('#ev-go').onclick = resumeNext; $('#ev-go').focus();
+    });
+  };
+  scene();
+}
+
+/* ---------- 엔딩 뒤 최종 점검 퀴즈 (인물·유물 카드 연계, 4지선다 5문제) ---------- */
+function pickFinalQuiz() {
+  const have = getCards();
+  const own = shuffle(FINAL_QUIZ.filter(q => have.includes(q.card))), rest = shuffle(FINAL_QUIZ.filter(q => !have.includes(q.card)));
+  return own.concat(rest).slice(0, FINAL_QUIZ_COUNT);
+}
+function showFinalQuiz() {
+  G.phase = 'FINALQ';
+  const qs = pickFinalQuiz(), log = []; let k = 0, correct = 0;
+  const frame = (inner) => root(`${topBar(false)}<div class="fq-wrap"><article class="scroll fq">
+      <div class="scroll-meta"><span class="tag gold">최종 점검 퀴즈</span><span class="tag">인물·유물 카드 문제</span><span class="tag">맞힌 문제 ${correct}개 · +${correct * FINAL_QUIZ_POINT}점</span></div>
+      <div class="fq-prog">${qs.map((_, j) => `<i class="${j < k ? (log[j] && log[j].ok ? 'ok' : 'no') : (j === k ? 'now' : '')}"></i>`).join('')}</div>
+      ${inner}</article></div>`);
+  const ask = () => {
+    const q = qs[k], order = shuffle(q.options.map((_, i) => i)), cd = CARDS.find(c => c.id === q.card);
+    frame(`<p class="fq-n">${k + 1} / ${qs.length} · 한 문제에 ${FINAL_QUIZ_POINT}점</p><h2 class="q">${esc(q.q)}</h2>
+      <div class="opts">${order.map((oi, j) => `<button class="opt" data-j="${j}"><span class="opt-n">${CIRC[j]}</span><span>${esc(q.options[oi])}</span></button>`).join('')}</div>`);
+    document.querySelectorAll('.opt').forEach(btn => btn.onclick = () => {
+      const j = +btn.dataset.j, ok = order[j] === q.answer;
+      if (ok) correct++;
+      log.push({ card: q.card, ok });
+      document.querySelectorAll('.opt').forEach((b2, i) => { b2.disabled = true; b2.classList.add(order[i] === q.answer ? 'right' : (i === j ? 'wrong' : 'dim')); });
+      const fb = document.createElement('div'); fb.className = 'fb fq-fb' + (ok ? '' : ' bad');
+      fb.innerHTML = `<b>${ok ? `정답! +${FINAL_QUIZ_POINT}점` : `아쉬워요. 정답은 "${esc(q.options[q.answer])}"`}</b><div class="fq-card">${cardHTML(cd, { flip: true })}<p>${esc(cd.text)}</p></div>`;
+      const act = document.createElement('div'); act.className = 'actions';
+      act.innerHTML = `<button class="btn primary" id="fq-next">${k + 1 < qs.length ? '다음 문제' : '결과 보기'}</button>`;
+      const sc = $('.scroll'); sc.appendChild(fb); sc.appendChild(act);
+      $('.fq .tag:last-child').textContent = `맞힌 문제 ${correct}개 · +${correct * FINAL_QUIZ_POINT}점`;
+      bindCards(fb);
+      $('#fq-next').onclick = () => { k++; if (k < qs.length) ask(); else done(); }; $('#fq-next').focus();
+    });
+  };
+  const done = () => {
+    G.finalQuiz = { correct, total: qs.length, bonus: correct * FINAL_QUIZ_POINT, items: log }; saveGame();
+    frame(`<h2>최종 점검 결과</h2>
+      <div class="fq-score"><b>${correct}</b> / ${qs.length} 문제 정답 <span>+${correct * FINAL_QUIZ_POINT}점</span></div>
+      <ul class="fq-list">${log.map(l => { const cd = CARDS.find(c => c.id === l.card); return `<li class="${l.ok ? 'ok' : 'no'}"><i>${l.ok ? '○' : '×'}</i>${esc(cd.type)} · <b>${esc(cd.name)}</b></li>`; }).join('')}</ul>
+      <p class="help">틀린 카드는 도감에서 다시 읽어 보세요. 퀴즈 점수는 최종 전공 점수에 더해졌습니다.</p>
+      <div class="actions"><button class="btn primary" id="fq-report">전적 기록부 보기</button></div>`);
+    $('#fq-report').onclick = showReport; $('#fq-report').focus();
+  };
+  ask();
 }
 
 /* ---------- 최종 보고서 ---------- */
@@ -328,7 +433,9 @@ function showReport() {
     </div>
     <h3>임진왜란 주요 전개 과정</h3>
     <table class="rp-table"><thead><tr><th>순서</th><th>시기</th><th>전투·사건</th><th>지휘관</th><th>주요 전략과 의의</th><th>결단</th><th>전공</th></tr></thead>
-    <tbody>${STAGES.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.worksheetDate)}</td><td><b>${esc(s.keyword.battle)}</b></td><td>${esc(s.keyword.who)}</td><td>${esc(s.keyword.meaning)}</td><td>${G.results[i] && G.results[i].quiz ? '○' : '×'}</td><td>${G.results[i] ? fmt(G.results[i].total) : '-'}</td></tr>`).join('')}</tbody></table>
+    <tbody>${STAGES.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.worksheetDate)}</td><td><b>${esc(s.keyword.battle)}</b></td><td>${esc(s.keyword.who)}</td><td>${esc(s.keyword.meaning)}</td><td>${G.results[i] && G.results[i].quiz ? '○' : '×'}</td><td>${G.results[i] ? fmt(G.results[i].total) : '-'}</td></tr>` +
+      (i === EVENT_AFTER_STAGE ? EVENTS.map(ev => `<tr class="ev-row"><td>사건</td><td>${esc(ev.worksheetDate || ev.date)}</td><td><b>${esc(ev.title)}</b></td><td>${esc(ev.who)}</td><td>${esc(ev.meaning)}</td><td>${G.events[ev.id] ? (G.events[ev.id].ok ? '○' : '×') : '-'}</td><td>${G.events[ev.id] ? '+' + fmt(G.events[ev.id].bonus) : '-'}</td></tr>`).join('') : '')).join('')}
+      <tr class="ev-row"><td>퀴즈</td><td>종전 후</td><td><b>최종 점검 퀴즈</b></td><td>-</td><td>인물·유물 카드 4지선다 ${G.finalQuiz ? `${G.finalQuiz.correct} / ${G.finalQuiz.total} 정답` : '(아직 안 풂)'}</td><td>-</td><td>${G.finalQuiz ? '+' + fmt(G.finalQuiz.bonus) : '-'}</td></tr></tbody></table>
     <h3>모은 인물·유물 카드 <small>${getCards().length} / ${CARDS.length} · 승리 요인을 쓸 때 참고하세요 (누르면 설명)</small></h3>
     <div class="rp-cards">${CARDS.filter(cd => getCards().includes(cd.id)).map(cd => `<button type="button" class="chip type-${CARD_TYPE_CLS[cd.type]}" data-id="${cd.id}"><i>${esc(cd.type)}</i>${esc(cd.name)}</button>`).join('') || '<span class="help">아직 모은 카드가 없어요.</span>'}</div>
     <h3>핵심 탐구 과제 <small>위 표와 게임 속 전투를 떠올리며 학습지에 답을 써 보세요</small></h3>

@@ -12,7 +12,9 @@
 function gPyongyang() {
   const CAN = { x: 92, y: 352 }, GROUND = 366;
   const MUZ = { x: CAN.x + 18, y: CAN.y - 10 };
-  const GRAV = 560, MAXPULL = 150, POWER = 3.5;
+  // [수정] 예전 세기(3.5)로는 맨 뒤 포루(오른쪽 끝)까지 포탄이 닿을 수 없었습니다(계산상 0발 명중).
+  //        세기를 4.6으로 올려 세 포루 모두 여러 각도(약 10°~60°)에서 맞힐 수 있게 했습니다.
+  const GRAV = 560, MAXPULL = 150, POWER = 4.6;
   const towers = [
     { x: 480, y: 300, w: 34, alive: true, fall: 0 },
     { x: 590, y: 258, w: 34, alive: true, fall: 0 },
@@ -27,7 +29,7 @@ function gPyongyang() {
   function simulate(vx, vy) {
     // 조준 중 미리보기용 점선 궤적. 실제 발사 물리(중력 포함)와 완전히 동일한 값으로 계산합니다.
     const pts = []; let x = MUZ.x, y = MUZ.y, vx2 = vx, vy2 = vy;
-    for (let i = 0; i < 46; i++) {
+    for (let i = 0; i < 64; i++) {
       const dt = 0.045; vy2 += GRAV * dt; x += vx2 * dt; y += vy2 * dt;
       if (y > 398 || x > GW + 10 || x < -10) break;
       pts.push([x, y]);
@@ -69,6 +71,7 @@ function gPyongyang() {
     g.ball = { x: MUZ.x, y: MUZ.y, vx, vy }; g.used++; g.state = 'fly'; g.st = 0; g.recoil = 0.3; g.aim = null; g.shake = 0.15;
     FX.muzzle(g.fx, MUZ.x, MUZ.y, 1); FX.add(g.fx, { k: 'flash', life: 0.12, a: 0.25 });
   };
+  g._sim = simulate; g._P = POWER; g.towers = towers;   // (점검용)
   g.ui = () => ({});
   g.result = () => { const d = towers.filter(t => !t.alive).length; return { score: Math.min(1000, d * 300 + Math.max(0, g.shots - g.used) * 30), note: `격파한 포루 ${d}곳 · 사용한 포탄 ${g.used}발 · 남은 시간 ${Math.max(0, Math.ceil(g.dur - g.t))}초` }; };
   g.draw = function (c) {
@@ -120,8 +123,15 @@ function gPyongyang() {
 
 /* Stage 6. 행주산성: 신기전/돌던지기 — 방패부대(신기전 면역, 2배속) 10명당 2명 */
 function gHaengju() {
-  const FY = 336, ZONE = 232, RCD = 1.6, SCD = 0.45;
-  const g = { dur: 25, t: 0, hp: 100, kills: 0, enemies: [], fx: [], spawnT: 0.4, rc: 0, sc: 0, gauge: 0, last: '', frenzy: 0, supplyT: 0, supplies: 0, done: false, over: false, overT: 0, shake: 0, controls: { kind: 'dual' } };
+  /* [역사 체험] 싸움이 길어지자 산성의 화살이 바닥나 위기를 맞았습니다. 이때 충청수사 정걸이
+     배에 화살을 싣고 한강을 거슬러 와 보급해 주었다고 전합니다.
+     → 신기전은 화살(발사 횟수)이 정해져 있고, 한강의 보급선이 조금씩 채워 줍니다. 아껴 쓰세요! */
+  const FY = 336, ZONE = 232, RCD = 1.6, SCD = 0.5;
+  const AMMO_MAX = 4, BOAT_T = 7.5, BOAT_GIVE = 2;
+  // [난이도] 적 1.5배: 원래 약 58명 → 약 85명 (큰 공격 4번 66명 + 틈틈이 약 19명)
+  const WAVES = [{ t: 3.5, n: 15 }, { t: 9.5, n: 16 }, { t: 15.5, n: 17 }, { t: 21, n: 18 }];
+  const g = { dur: 25, t: 0, hp: 100, kills: 0, enemies: [], fx: [], spawnT: 0.4, wi: 0, warned: false, rc: 0, sc: 0, gauge: 0, last: '', frenzy: 0, supplyT: 0, supplies: 0, done: false, over: false, overT: 0, shake: 0,
+    ammo: AMMO_MAX, boat: null, boats: 0, wasted: 0, controls: { kind: 'dual' } };
   const women = [];
   g.update = function (dt) {
     FX.step(g.fx, dt); g.shake = Math.max(0, g.shake - dt);
@@ -130,11 +140,25 @@ function gHaengju() {
     if (g.over) { g.overT += dt; if (g.overT > 2.0) g.done = true; return; }
     g.t += dt; const p = Math.min(1, g.t / g.dur);
     g.rc = Math.max(0, g.rc - dt); g.sc = Math.max(0, g.sc - dt); g.frenzy = Math.max(0, g.frenzy - dt); g.supplyT = Math.max(0, g.supplyT - dt);
+    // 정걸의 화살 보급선: 신기전이 모자라면 한강을 거슬러 출발 → 도착하면 +2
+    if (!g.boat && g.ammo < AMMO_MAX) g.boat = { t: 0 };
+    if (g.boat) {
+      g.boat.t += dt;
+      if (g.boat.t >= BOAT_T) { g.ammo = Math.min(AMMO_MAX, g.ammo + BOAT_GIVE); g.boats++; g.boat = null; FX.add(g.fx, { k: 'txt', s: `정걸의 보급선 도착! 신기전 +${BOAT_GIVE}`, x: GW / 2, y: 300, size: 20, c: '#BFE3FF', life: 1.3 }); }
+    }
     g.spawnT -= dt;
-    if (g.spawnT <= 0) {
-      g.spawnT = Math.max(0.42, 0.78 - 0.3 * p);
-      const n = Math.random() < 0.3 + 0.35 * p ? 2 : 1;
-      for (let i = 0; i < n; i++) { const shield = Math.random() < 0.2, baseVy = rand(40, 58) * (1 + 0.25 * p); g.enemies.push({ x: rand(50, GW - 50), y: -30 - i * 24, vy: shield ? baseVy * 2 : baseVy, shield, ph: rand(0, 6), atk: 0, reached: false, dead: false, dieT: 0 }); }
+    const mk = (x, y) => { const shield = Math.random() < 0.2, baseVy = rand(40, 58) * (1 + 0.25 * p); g.enemies.push({ x, y, vy: shield ? baseVy * 2 : baseVy, shield, ph: rand(0, 6), atk: 0, reached: false, dead: false, dieT: 0 }); };
+    // 틈틈이 올라오는 적 (띄엄띄엄)
+    if (g.spawnT <= 0) { g.spawnT = rand(1.1, 1.5); mk(rand(50, GW - 50), -30); }
+    // [역사 체험] 왜군은 여러 부대가 번갈아 몰려오며 공격했습니다(『징비록』). 큰 공격(파도)이 올 때 신기전을 쓰세요!
+    if (g.wi < WAVES.length) {
+      const w = WAVES[g.wi];
+      if (!g.warned && g.t >= w.t - 1.6) { g.warned = true; FX.add(g.fx, { k: 'txt', s: `왜군 ${g.wi + 1}차 공격이 몰려온다!`, x: GW / 2, y: 92, size: 24, c: '#FFB3A3', life: 1.6 }); }
+      if (g.t >= w.t) {
+        const cx = rand(170, GW - 170);
+        for (let i = 0; i < w.n; i++) mk(clamp(cx + rand(-150, 150), 40, GW - 40), -30 - rand(0, 110));
+        g.wi++; g.warned = false;
+      }
     }
     for (const e of g.enemies) {
       if (e.dead) continue; e.ph += dt * 8;
@@ -146,35 +170,44 @@ function gHaengju() {
   };
   function gain(w) {
     g.gauge += (g.last && g.last !== w) ? 15 : 4; g.last = w;
-    if (g.gauge >= 100) { g.gauge = 0; g.rc = 0; g.sc = 0; g.frenzy = 3.5; g.supplyT = 2.2; g.supplies++; women.length = 0; for (let i = 0; i < 6; i++) women.push({ x: -40 - i * 46, v: 230 + rand(-20, 20) }); FX.add(g.fx, { k: 'txt', s: '행주치마 보급대 출동!', x: GW / 2, y: 190, size: 26, life: 1.4 }); }
+    if (g.gauge >= 100) { g.gauge = 0; g.sc = 0; g.frenzy = 3.5; g.supplyT = 2.2; g.supplies++; women.length = 0; for (let i = 0; i < 6; i++) women.push({ x: -40 - i * 46, v: 230 + rand(-20, 20) }); FX.add(g.fx, { k: 'txt', s: '행주치마 보급대 출동! 돌 던지기 강화', x: GW / 2, y: 190, size: 24, life: 1.4 }); }
   }
   g.action = function (name, down) {
     if (g.over || down === false) return;
-    const f = g.frenzy > 0 ? 0.35 : 1;
+    const f = g.frenzy > 0 ? 0.35 : 1;   // 행주치마 보급대: 돌 던지기만 빨라집니다
     if (name === 'rocket' && g.rc <= 0) {
-      g.rc = RCD * f; gain('rocket');
+      if (g.ammo <= 0) { FX.add(g.fx, { k: 'txt', s: '신기전 화살이 바닥났다! 보급선을 기다리세요', x: GW / 2, y: 150, size: 18, c: '#FF9A88', life: 0.9 }); return; }
+      g.rc = RCD; g.ammo--;
       // 신기전은 방패부대(e.shield)를 절대 죽이지 못합니다 - 아래 필터에서 항상 제외됩니다.
       const targets = g.enemies.filter(e => !e.dead && !e.shield && e.y < ZONE && e.y > -10);
+      if (targets.length) gain('rocket');
       for (let i = 0; i < 9; i++) FX.add(g.fx, { k: 'line', x0: 120 + i * 62, y0: FY + 4, x1: 80 + i * 70 + rand(-20, 20), y1: rand(40, ZONE), life: 0.5, c: '#FFD27A', w: 3 });
       for (let i = 0; i < 5; i++) FX.muzzle(g.fx, 150 + i * 110, FY + 2, 1);
       g.shake = 0.2;
       targets.forEach(e => { e.dead = true; e.dieT = 0; g.kills++; FX.explode(g.fx, e.x, e.y - 20, { r: 24, n: 5, smoke: 1 }); });
       if (targets.length) FX.add(g.fx, { k: 'txt', s: `신기전 +${targets.length}`, x: GW / 2, y: 120, size: 20, life: 0.8 });
+      else { g.wasted++; FX.add(g.fx, { k: 'txt', s: '허탕! 적이 모였을 때 쏘세요', x: GW / 2, y: 120, size: 20, c: '#FF9A88', life: 0.9 }); }
       // 신기전 사거리 안에 방패부대가 있었다면, 맞고도 멀쩡하다는 것을 눈으로 확실히 보여줍니다.
       const shieldedInRange = g.enemies.filter(e => !e.dead && e.shield && e.y < ZONE && e.y > -10);
       shieldedInRange.forEach(e => { FX.add(g.fx, { k: 'txt', s: '무효!', x: e.x, y: e.y - 46, size: 18, c: '#9FD1FF', life: 0.7 }); FX.add(g.fx, { k: 'burst', x: e.x, y: e.y - 10, r: 16, c: '#5F9FE0', life: 0.35 }); });
       const shielded = g.enemies.some(e => !e.dead && e.shield && e.y < ZONE + 40);
       if (shielded) FX.add(g.fx, { k: 'txt', s: '방패부대는 신기전이 안 통해요! 돌 던지기로 처치하세요', x: GW / 2, y: 150, size: 16, c: '#9FD1FF', life: 0.9 });
     } else if (name === 'stone' && g.sc <= 0) {
-      g.sc = SCD * f; gain('stone');
+      g.sc = SCD * f;
       // 돌 던지기는 방패부대를 포함해 가리지 않고 맞힙니다 (방패부대를 잡는 유일한 방법).
-      const near = g.enemies.filter(e => !e.dead && e.y >= ZONE - 30).sort((a, b) => b.y - a.y).slice(0, g.frenzy > 0 ? 3 : 2);
+      // [난이도] 한 번에 가장 가까운 적 1명 (행주치마 보급 중에는 2명)
+      const near = g.enemies.filter(e => !e.dead && e.y >= ZONE - 30).sort((a, b) => b.y - a.y).slice(0, g.frenzy > 0 ? 2 : 1);
+      if (near.length) gain('stone');
       near.forEach(e => { e.dead = true; e.dieT = 0; g.kills++; FX.add(g.fx, { k: 'line', x0: e.x + rand(-60, 60), y0: FY + 10, x1: e.x, y1: e.y - 16, life: 0.25, c: '#D8D2C2', w: 5 }); FX.add(g.fx, { k: 'burst', x: e.x, y: e.y - 18, r: 20, c: '#CFC6B0', life: 0.3 }); for (let i = 0; i < 4; i++) FX.add(g.fx, { k: 'debris', x: e.x, y: e.y - 18, vx: rand(-110, 110), vy: rand(-200, -80), s: rand(3, 5), c: '#8A8272', life: 0.7 }); });
     }
   };
   g.onDown = (x) => g.action(x < GW / 2 ? 'rocket' : 'stone');
-  g.ui = () => ({ rocket: g.rc / (RCD * (g.frenzy > 0 ? 0.35 : 1)), stone: g.sc / (SCD * (g.frenzy > 0 ? 0.35 : 1)), frenzy: g.frenzy > 0 });
-  g.result = () => ({ score: Math.min(1000, Math.round(g.kills * 16 + g.hp * 2.5 + g.supplies * 30)), note: `격퇴 ${g.kills}명 · 산성 체력 ${Math.round(g.hp)} · 보급대 ${g.supplies}회` });
+  g.ui = () => ({
+    rocket: g.ammo <= 0 ? 1 : g.rc / RCD, stone: g.sc / (SCD * (g.frenzy > 0 ? 0.35 : 1)), frenzy: g.frenzy > 0,
+    lbl: { rocket: `신기전 발사 (${g.ammo}/${AMMO_MAX})` },
+    sub: { rocket: g.ammo <= 0 ? `보급선 도착까지 ${Math.max(0, Math.ceil(BOAT_T - (g.boat ? g.boat.t : 0)))}초` : '큰 공격이 올 때 한꺼번에!', stone: g.frenzy > 0 ? '행주치마 보급: 2명씩!' : '가장 가까운 적 1명 (방패도)' }
+  });
+  g.result = () => ({ score: Math.min(1000, Math.round(g.kills * 8 + g.hp * 3 + g.supplies * 20 - g.wasted * 15)), note: `격퇴 ${g.kills}명 · 산성 체력 ${Math.round(g.hp)} · 행주치마 ${g.supplies}회` + (g.wasted ? ` · 신기전 허탕 ${g.wasted}회(-${g.wasted * 15})` : '') });
   g.draw = function (c) {
     c.save(); if (g.shake > 0) c.translate(rand(-3, 3), rand(-3, 3));
     vgrad(c, 0, 0, GW, GH, '#39483A', '#5E6B48');
@@ -193,11 +226,20 @@ function gHaengju() {
     for (let x = 0; x < GW; x += 22) { c.fillStyle = '#7A5A3A'; c.beginPath(); c.moveTo(x + 2, FY + 16); c.lineTo(x + 11, FY - 10); c.lineTo(x + 20, FY + 16); c.closePath(); c.fill(); }
     for (let i = 0; i < 7; i++) drawSoldier(c, 'js', 'back', 60 + i * 101, FY + 64, 0.95, 0, { shadow: 0 });
     c.fillStyle = '#2E6E86'; c.fillRect(GW / 2 + 1, FY - 34, 40, 22); txt(c, '권', GW / 2 + 21, FY - 17, { size: 16, align: 'center', serif: true, w: 900, color: '#F1E9D6' });
+    // 한강(화면 맨 아래)과 정걸의 보급선
+    vgrad(c, 0, GH - 16, GW, 16, '#2E5E72', '#1E4252');
+    if (g.boat) {
+      const k = clamp(g.boat.t / BOAT_T, 0, 1), bx = GW + 50 - (GW * 0.55 + 50) * k, by = GH - 10 + Math.sin(g.t * 3) * 1.5;
+      if (!Spr.draw(c, 'shpo', 0, 3, bx, by, 0.42)) shipVec(c, bx, by - 8, 0.3, -1);
+      txt(c, `정걸의 화살 보급선 ${Math.max(0, Math.ceil(BOAT_T - g.boat.t))}초`, bx, GH - 44, { size: 12, align: 'center', color: '#BFE3FF', stroke: C.ink, sw: 3 });
+    }
     if (g.supplyT > 0) women.forEach(w => { if (w.x > -30 && w.x < GW + 30) { const yy = FY + 60; c.fillStyle = '#B5352A'; c.beginPath(); c.moveTo(w.x - 9, yy - 12); c.lineTo(w.x + 9, yy - 12); c.lineTo(w.x + 13, yy + 12); c.lineTo(w.x - 13, yy + 12); c.closePath(); c.fill(); c.fillStyle = '#E0B48F'; c.beginPath(); c.arc(w.x, yy - 32, 7, 0, 7); c.fill(); } });
     FX.draw(c, g.fx); c.restore();
     bar(c, 14, 12, 190, 18, g.hp / 100, g.hp > 40 ? '#7FB7A4' : '#C4432F'); txt(c, `산성 ${Math.round(g.hp)}`, 22, 26, { size: 12, color: C.por, stroke: C.ink, sw: 3 });
-    bar(c, GW / 2 - 130, 12, 260, 18, g.gauge / 100, g.frenzy > 0 ? '#E2C273' : '#B5352A'); txt(c, g.frenzy > 0 ? '행주치마 보급 중!' : '행주치마 게이지: 번갈아 누르기', GW / 2, 26, { size: 12, align: 'center', color: C.por, stroke: C.ink, sw: 3 });
+    bar(c, GW / 2 - 130, 12, 260, 18, g.gauge / 100, g.frenzy > 0 ? '#E2C273' : '#B5352A'); txt(c, g.frenzy > 0 ? '행주치마 보급 중!' : '행주치마 게이지: 적을 맞히며 두 무기 번갈아 쓰기', GW / 2, 26, { size: 12, align: 'center', color: C.por, stroke: C.ink, sw: 3 });
     txt(c, `격퇴 ${g.kills}`, GW - 14, 28, { size: 20, align: 'right', stroke: C.ink });
+    txt(c, '신기전', GW - 14 - AMMO_MAX * 16 - 6, 54, { size: 12, align: 'right', color: '#FFD27A', stroke: C.ink, sw: 3 });
+    for (let i = 0; i < AMMO_MAX; i++) { const on = i < g.ammo, x = GW - 22 - (AMMO_MAX - 1 - i) * 16; c.fillStyle = on ? '#FFD27A' : 'rgba(233,237,230,.22)'; c.fillRect(x - 2, 40, 4, 16); c.beginPath(); c.moveTo(x - 5, 42); c.lineTo(x, 34); c.lineTo(x + 5, 42); c.closePath(); c.fill(); }
     bar(c, 14, 36, 190, 8, 1 - g.t / g.dur, C.gold);
     if (g.over) { c.fillStyle = 'rgba(15,26,40,.65)'; c.fillRect(0, 0, GW, GH); txt(c, g.hp <= 0 ? '산성이 위태롭습니다!' : '행주산성을 지켜 냈습니다', GW / 2, 220, { size: 32, serif: true, w: 900, align: 'center' }); }
   };
@@ -206,24 +248,32 @@ function gHaengju() {
 
 /* Stage 7. 명량: 울돌목 조류 서바이벌 — 물살 1.2배, 왜선 절반만 화살 사격 */
 function gMyeongnyang() {
-  const LM = 96, RM = GW - 96, FY = 372, ACC = 1.2, BASE = 62 * ACC, SURGE = 105 * ACC, PEN = 25;
-  const g = { dur: 30, t: 0, fleet: 13, sunk: 0, hits: 0, wallHits: 0, enemies: [], arrows: [], fx: [], spawnT: 0.9, done: false, over: false, overT: 0, curV: 0, curDir: 1, surge: 0, warn: false, flips: [6, 12.5, 19, 25.5], fi: 0, left: false, right: false, flag: { x: GW / 2, vx: 0, inv: 0, cool: 0.4, hurt: 0, wallCd: 0 }, controls: { kind: 'steer' } };
+  /* [난이도] 물살(울돌목 조류)의 힘 1.2배 더 강하게(1.2 → 1.44), 대장선에 전해지는 물살 50% → 80%, 대장선 관성 1.2배,
+     왜선 1.5배, 게임 시간 2배(30초 → 60초). */
+  const DUR = 60, LM = 96, RM = GW - 96, FY = 372, ACC = 1.2 * 1.2, BASE = 62 * ACC, SURGE = 105 * ACC, PEN = 25, STEER = 6 / 1.2;
+  // [울돌목 체험] 물살의 80%가 대장선을 밀어냅니다(예전 50%). 물살이 바뀌는 때도 5~9초 사이로 불규칙해서
+  //  박자를 외워 버틸 수 없고, "곧 물살이 바뀝니다!" 경고를 보고 미리 반대로 조타해야 합니다.
+  // OAR: 노 젓는 힘(예전 190 → 140). 가장 센 물살(약 121)보다 조금만 강해서, 계속 거슬러 저어야 버팁니다.
+  // SURGE_T: 물살이 바뀐 직후 급류가 몰아치는 시간(2.4초 → 3.2초)
+  const PUSH = 0.8, OAR = 140, SURGE_T = 3.2;
+  const flips = []; for (let t = rand(5, 7); t < DUR - 1; t += rand(5, 9)) flips.push(t);
+  const g = { dur: DUR, t: 0, fleet: 13, sunk: 0, byGun: 0, byCur: 0, hits: 0, wallHits: 0, enemies: [], arrows: [], fx: [], spawnT: 0.9, done: false, over: false, overT: 0, curV: 0, curDir: 1, surge: 0, warn: false, flips, fi: 0, left: false, right: false, flag: { x: GW / 2, vx: 0, inv: 0, cool: 0.4, hurt: 0, wallCd: 0 }, controls: { kind: 'steer' } };
   const marks = []; for (let i = 0; i < 40; i++) marks.push({ x: rand(LM, RM), y: rand(0, GH), l: rand(14, 30) });
   const shoreL = [], shoreR = []; for (let y = 0; y <= GH + 20; y += 20) { shoreL.push(LM - rand(0, 24)); shoreR.push(RM + rand(0, 24)); }
-  function sink(e) { if (e.sink) return; e.sink = 0.001; g.sunk++; FX.splash(g.fx, e.x, e.y + 16, { n: 5 }); FX.add(g.fx, { k: 'smoke', x: e.x, y: e.y, r: 16, life: 1.2 }); }
+  function sink(e, by) { if (e.sink) return; e.sink = 0.001; g.sunk++; if (by === 'gun') g.byGun++; else g.byCur++; FX.splash(g.fx, e.x, e.y + 16, { n: 5 }); FX.add(g.fx, { k: 'smoke', x: e.x, y: e.y, r: 16, life: 1.2 }); }
   g.update = function (dt) {
     FX.step(g.fx, dt);
     if (g.over) { g.overT += dt; if (g.overT > 1.8) g.done = true; return; }
     g.t += dt; const p = g.t / g.dur, f = g.flag;
     if (g.fi < g.flips.length) {
       const ft = g.flips[g.fi]; g.warn = g.t > ft - 1.4 && g.t < ft;
-      if (g.t >= ft) { g.curDir *= -1; g.surge = 2.4; g.fi++; g.warn = false; FX.add(g.fx, { k: 'txt', s: '물살이 바뀌었다!', x: GW / 2, y: 170, size: 26, life: 1.3 }); }
+      if (g.t >= ft) { g.curDir *= -1; g.surge = SURGE_T; g.fi++; g.warn = false; FX.add(g.fx, { k: 'txt', s: '물살이 바뀌었다!', x: GW / 2, y: 170, size: 26, life: 1.3 }); }
     } else g.warn = false;
     g.surge = Math.max(0, g.surge - dt);
     g.curV += (g.curDir * (g.surge > 0 ? SURGE : BASE) - g.curV) * Math.min(1, dt * 2.5);
     marks.forEach(m => { m.x += g.curV * dt * 1.2; m.y += 20 * dt; if (m.x < LM - 10) m.x = RM; if (m.x > RM + 10) m.x = LM; if (m.y > GH) m.y = 0; });
     g.spawnT -= dt;
-    if (g.spawnT <= 0) { g.spawnT = rand(0.7, 1.0) * (1 - 0.15 * p); g.enemies.push({ x: rand(LM + 34, RM - 34), y: -40, vy: rand(62, 96), k: rand(0.45, 1.7), f: rand(0.8, 1.8), ph: rand(0, 6), sink: 0, canShoot: Math.random() < 0.5, shootT: rand(1.0, 2.0), aim: 0, flash: 0 }); }
+    if (g.spawnT <= 0) { g.spawnT = rand(0.7, 1.0) * (1 - 0.15 * p) / 1.5; g.enemies.push({ x: rand(LM + 34, RM - 34), y: -40, vy: rand(62, 96), k: rand(0.45, 1.7), f: rand(0.8, 1.8), ph: rand(0, 6), sink: 0, canShoot: Math.random() < 0.5, shootT: rand(1.0, 2.0), aim: 0, flash: 0 }); }
     const mult = g.surge > 0 ? 2.2 : 1;
     for (const e of g.enemies) {
       if (e.sink) { e.sink += dt; continue; }
@@ -231,7 +281,8 @@ function gMyeongnyang() {
       if (e.x < LM + 8 || e.x > RM - 8) sink(e);
       e.flash = Math.max(0, e.flash - dt);
       if (e.canShoot) {
-        if (e.aim > 0) { e.aim -= dt; if (e.aim <= 0) { const tx = f.x + f.vx * 0.35, ty = FY, d = dist(e.x, e.y, tx, ty) || 1; g.arrows.push({ x: e.x, y: e.y + 10, vx: (tx - e.x) / d * 215, vy: (ty - e.y) / d * 215 }); e.flash = 0.25; } }
+        // 왜군 궁수는 물살에 떠밀리는 대장선의 움직임을 읽고 앞을 겨눕니다 → 가만히 있으면 맞습니다. 방향을 바꿔 피하세요!
+        if (e.aim > 0) { e.aim -= dt; if (e.aim <= 0) { const lead = dist(e.x, e.y, f.x, FY) / 215, tx = clamp(f.x + (f.vx + g.curV * PUSH) * lead, LM + 20, RM - 20), ty = FY, d = dist(e.x, e.y, tx, ty) || 1; g.arrows.push({ x: e.x, y: e.y + 10, vx: (tx - e.x) / d * 215, vy: (ty - e.y) / d * 215 }); e.flash = 0.25; } }
         else { e.shootT -= dt; if (e.shootT <= 0 && e.y > 30 && e.y < FY - 110) { e.aim = 0.45; e.shootT = rand(1.7, 2.6); } }
       }
     }
@@ -239,8 +290,8 @@ function gMyeongnyang() {
     for (let i = 0; i < alive.length; i++) for (let j = i + 1; j < alive.length; j++) { const a = alive[i], b = alive[j]; if (dist(a.x, a.y, b.x, b.y) < 34) { sink(a); sink(b); FX.add(g.fx, { k: 'burst', x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, r: 36, life: 0.5 }); } }
     g.enemies = g.enemies.filter(e => e.sink < 0.7 && e.y < GH + 50);
     const dir = (g.right ? 1 : 0) - (g.left ? 1 : 0);
-    f.vx += (dir * 190 - f.vx) * Math.min(1, dt * 6);
-    const desiredX = f.x + (f.vx + g.curV * 0.5) * dt, hitWall = desiredX < LM + 20 || desiredX > RM - 20;
+    f.vx += (dir * OAR - f.vx) * Math.min(1, dt * STEER);   // OAR: 노 젓는 힘(조타 최고 속도)   // 관성: 조타에 천천히 반응
+    const desiredX = f.x + (f.vx + g.curV * PUSH) * dt, hitWall = desiredX < LM + 20 || desiredX > RM - 20;
     f.x = clamp(desiredX, LM + 20, RM - 20);
     f.wallCd = Math.max(0, f.wallCd - dt);
     if (hitWall && f.wallCd <= 0) {
@@ -255,14 +306,14 @@ function gMyeongnyang() {
     }
     g.arrows = g.arrows.filter(a => !a.gone && a.y < GH + 30 && a.x > -30 && a.x < GW + 30);
     for (const e of g.enemies) { if (e.sink) continue; if (dist(e.x, e.y, f.x, FY) < 36) { sink(e); if (f.inv <= 0) { g.fleet--; f.inv = 1.2; FX.add(g.fx, { k: 'txt', s: '전선 -1', x: f.x, y: FY - 44, size: 20, c: '#E8A29A', life: 0.9 }); } } }
-    if (f.cool <= 0) { let best = null; for (const e of g.enemies) { if (e.sink) continue; if (e.y < FY - 24 && e.y > FY - 285 && Math.abs(e.x - f.x) < 58 && (!best || e.y > best.y)) best = e; } if (best) { f.cool = 0.6; sink(best); FX.muzzle(g.fx, f.x, FY - 26, 1); FX.explode(g.fx, best.x, best.y, { r: 26, n: 6, smoke: 2 }); FX.add(g.fx, { k: 'line', x0: f.x, y0: FY - 26, x1: best.x, y1: best.y, life: 0.25, c: '#FFE7A8', w: 4 }); } }
+    if (f.cool <= 0) { let best = null; for (const e of g.enemies) { if (e.sink) continue; if (e.y < FY - 24 && e.y > FY - 285 && Math.abs(e.x - f.x) < 58 && (!best || e.y > best.y)) best = e; } if (best) { f.cool = 0.6; sink(best, 'gun'); FX.muzzle(g.fx, f.x, FY - 26, 1); FX.explode(g.fx, best.x, best.y, { r: 26, n: 6, smoke: 2 }); FX.add(g.fx, { k: 'line', x0: f.x, y0: FY - 26, x1: best.x, y1: best.y, life: 0.25, c: '#FFE7A8', w: 4 }); } }
     if (g.fleet <= 0) { g.fleet = 0; g.over = true; } else if (g.t >= g.dur) { g.over = true; g.t = g.dur; }
   };
   g.action = (n, d) => { if (n === 'left') g.left = d !== false; if (n === 'right') g.right = d !== false; };
   const setSide = (x) => { g.left = x < GW / 2; g.right = x >= GW / 2; };
   g.onDown = (x) => setSide(x); g.onMove = (x, y, down) => { if (down) setSide(x); }; g.onUp = () => { g.left = false; g.right = false; };
   g.ui = () => ({});
-  g.result = () => ({ score: clamp(g.sunk * 34 + g.fleet * 10 - g.hits * PEN - g.wallHits * PEN, 0, 1000), note: `격침 ${g.sunk}척 · 남은 전선 ${g.fleet}척` + (g.hits ? ` · 화살 ${g.hits}회 맞음(-${g.hits * PEN})` : '') + (g.wallHits ? ` · 벽 충돌 ${g.wallHits}회(-${g.wallHits * PEN})` : '') });
+  g.result = () => ({ score: clamp(g.byGun * 20 + g.byCur * 4 + g.fleet * 10 - g.hits * PEN - g.wallHits * PEN, 0, 1000), note: `격침 ${g.sunk}척(포격 ${g.byGun}·조류 ${g.byCur}) · 남은 전선 ${g.fleet}척` + (g.hits ? ` · 화살 ${g.hits}회 맞음(-${g.hits * PEN})` : '') + (g.wallHits ? ` · 벽 충돌 ${g.wallHits}회(-${g.wallHits * PEN})` : '') });
   g.draw = function (c) {
     if (!Spr.bg(c, 'bgSea', { px: 0.5, py: 0.5 })) vgrad(c, 0, 0, GW, GH, '#12475A', '#0C3242');
     c.fillStyle = 'rgba(6,42,66,.42)'; c.fillRect(0, 0, GW, GH);
@@ -289,6 +340,7 @@ function gMyeongnyang() {
     if (g.wallHits) { txt(c, `벽 충돌 ${g.wallHits}회 -${g.wallHits * PEN}`, 14, hy, { size: 15, color: '#FF9A88', stroke: C.ink, sw: 4 }); hy += 22; }
     const s = Math.sign(g.curV) || 1, cx = GW / 2; c.fillStyle = g.warn ? '#FFB3A3' : 'rgba(255,255,255,.95)';
     c.beginPath(); c.moveTo(cx + s * 30, 20); c.lineTo(cx + s * 10, 8); c.lineTo(cx + s * 10, 32); c.closePath(); c.fill();
+    txt(c, `남은 시간 ${Math.max(0, Math.ceil(g.dur - g.t))}초`, GW / 2, 56, { size: 14, align: 'center', color: C.gold2, stroke: C.ink, sw: 3 });
     for (let i = 0; i < 13; i++) { const ok = i < g.fleet; c.globalAlpha = ok ? 1 : 0.22; if (!Spr.draw(c, 'shpo', 0, 1, GW - 22 - i * 24, 24, 0.2, {})) shipVec(c, GW - 22 - i * 24, 24, 0.2, 1, {}); c.globalAlpha = 1; }
     bar(c, 14, 40 + (g.hits ? 22 : 0) + (g.wallHits ? 22 : 0), 190, 8, 1 - g.t / g.dur, C.gold);
     if (g.warn) { c.fillStyle = 'rgba(196,67,47,.12)'; c.fillRect(0, 0, GW, GH); txt(c, '곧 물살이 바뀝니다!', GW / 2, 130, { size: 28, align: 'center', serif: true, w: 900, stroke: C.ink, sw: 6, color: '#FFD7CE' }); }
@@ -316,17 +368,24 @@ function gNoryang() {
     return false;
   }
   const inBay = (x, y) => x > BAY.x0 && x < BAY.x1 + 4 && y > BAY.y0 && y < BAY.y1;
-  const g = { dur: DUR, t: 0, burned: 0, trapped: 0, escaped: 0, fx: [], done: false, over: false, overT: 0, key: 0, spawnT: 0.2, shake: 0,
-    controls: { kind: 'hint', hint: '누른 채 움직이면 대장선이 따라갑니다. 왜선을 아래쪽 관음포로 몰고, 바짝 붙어 불화살로 태우세요' } };
+  /* [난이도] 왜선이 가끔 느린 총알(조총·화포)을 쏩니다. 붉은 느낌표(!)가 뜨면 곧 쏜다는 뜻.
+     거북선이 총알에 맞으면 그 자리에서 전투가 끝나므로(그때까지의 점수만 기록) 바로 피해야 합니다. */
+  const B_SPEED = 50, B_R = 12, B_MAX = 2, B_LIFE = 4.2, AIM_T = 1.0, FIRE_MIN = 110, FIRE_RANGE = 320, GRACE = 5, SAFE_BONUS = 80;
+  const g = { dur: DUR, t: 0, burned: 0, trapped: 0, escaped: 0, fx: [], done: false, over: false, overT: 0, key: 0, spawnT: 0.2, shake: 0, bullets: [], headHit: false, dodged: 0,
+    controls: { kind: 'hint', hint: '누른 채 움직이면 거북선이 따라갑니다. 왜선을 관음포로 몰아 불태우세요. 왜선의 총알(!)은 반드시 피하세요 — 맞으면 즉시 종료!' } };
   const head = { x: 560, y: 150, ang: Math.PI }, tgt = { x: 560, y: 150, on: false };
   const ming = { x: 430, y: 66, dir: 1 };
   const ships = [];
-  g.ships = ships; g.head = head;   // (점검용) 현재 왜선·대장선 상태
+  g.ships = ships; g.head = head;   // (점검용) 현재 왜선·거북선 상태
   function spawn() {
     for (let k = 0; k < 20; k++) {
       const y = rand(50, 285); if (inLand(GW - 10, y)) continue;   // 좁은 노량 해협(북쪽 물길)으로 들어옴
-      ships.push({ x: GW + 30, y, vx: -45, vy: 0, heat: 0, burn: 0, sink: 0, trapped: false, trapT: 0, f: pick([0, 1, 2]) }); return;
+      ships.push({ x: GW + 30, y, vx: -45, vy: 0, heat: 0, burn: 0, sink: 0, trapped: false, trapT: 0, f: pick([0, 1, 2]), fireT: rand(4, 8), aim: 0 }); return;
     }
+  }
+  function headHit() {
+    g.headHit = true; g.over = true; g.overT = 0; g.shake = 0.6;
+    FX.explode(g.fx, head.x, head.y, { r: 56, n: 14, smoke: 6, flash: 0.6, dc: '#3A2A1C' }); FX.splash(g.fx, head.x, head.y + 10, { n: 8, r: 34 });
   }
   const norm = (a) => ((a + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
   function tryMove(o, dx, dy) {
@@ -380,8 +439,28 @@ function gNoryang() {
       }
       if (s.x < -20 && !s.sink) { s.gone = true; if (!s.burn) { g.escaped++; FX.add(g.fx, { k: 'txt', s: '한 척 빠져나갔다', x: 70, y: s.y, size: 15, c: '#FF9A88', life: 1.0 }); } }
       if (Math.random() < dt * (s.burn ? 4 : 0)) FX.add(g.fx, { k: 'smoke', x: s.x + rand(-8, 8), y: s.y - 24, r: rand(8, 14), vy: -30, life: 1.4 });
+      // 사격: 불붙지 않고 갇히지 않은 왜선이 거북선이 가까우면 가끔 느린 총알을 쏩니다 (조준 0.8초 → 발사)
+      if (!s.burn && !s.sink && !s.trapped && !s.gone) {
+        const hd = dist(s.x, s.y, head.x, head.y);
+        if (s.aim > 0) {
+          s.aim -= dt;
+          if (s.aim <= 0 && hd < FIRE_MIN * 0.75) { s.aim = 0; s.fireT = rand(2, 4); }   // 거북선이 코앞까지 붙으면 쏠 틈이 없습니다
+          else if (s.aim <= 0) { const d = hd || 1; g.bullets.push({ x: s.x, y: s.y - 6, vx: (head.x - s.x) / d * B_SPEED, vy: (head.y - s.y + 6) / d * B_SPEED, t: 0 }); FX.muzzle(g.fx, s.x, s.y - 6, head.x < s.x ? -1 : 1); s.fireT = rand(9, 14); }
+        } else if (g.t > GRACE && s.x > 10 && s.x < GW - 20 && hd > FIRE_MIN && hd < FIRE_RANGE) {
+          s.fireT -= dt;
+          if (s.fireT <= 0 && g.bullets.length + ships.filter(o => o.aim > 0).length < B_MAX) s.aim = AIM_T;
+        }
+      } else s.aim = 0;
     }
     for (let i = ships.length - 1; i >= 0; i--) if (ships[i].gone || ships[i].sink > 1.2) ships.splice(i, 1);
+    // 총알 이동 · 거북선 피격 판정
+    for (const b of g.bullets) {
+      b.t += dt; b.x += b.vx * dt; b.y += b.vy * dt;
+      if (dist(b.x, b.y, head.x, head.y) < B_R) { b.gone = true; headHit(); break; }
+      if (b.t > B_LIFE || inLand(b.x, b.y) || b.x < -10 || b.x > GW + 10 || b.y > GH + 10) { b.gone = true; if (b.t > 0.6 && !inLand(b.x, b.y)) g.dodged++; else if (inLand(b.x, b.y)) FX.add(g.fx, { k: 'burst', x: b.x, y: b.y, r: 10, c: '#8A7A60', life: 0.3 }); }
+    }
+    g.bullets = g.bullets.filter(b => !b.gone);
+    if (g.over) return;
     if (g.t >= DUR) { g.over = true; g.t = DUR; }
   };
   g.onDown = (x, y) => { tgt.x = x; tgt.y = y; tgt.on = true; };
@@ -389,7 +468,7 @@ function gNoryang() {
   g.onUp = () => { tgt.on = false; };
   g.action = (n, d) => { g.key = n === 'left' ? (d === false ? 0 : -1) : (n === 'right' ? (d === false ? 0 : 1) : g.key); };
   g.ui = () => ({});
-  g.result = () => ({ score: clamp(g.burned * 18 + g.trapped * 24 - g.escaped * 20, 0, 1000), note: `불태운 왜선 ${g.burned}척 · 관음포에 가둔 왜선 ${g.trapped}척` + (g.escaped ? ` · 빠져나간 왜선 ${g.escaped}척(-${g.escaped * 20})` : '') });
+  g.result = () => ({ score: clamp(g.burned * 18 + g.trapped * 24 - g.escaped * 20 + (g.headHit ? 0 : SAFE_BONUS), 0, 1000), note: `불태운 왜선 ${g.burned}척 · 관음포에 가둔 왜선 ${g.trapped}척` + (g.escaped ? ` · 빠져나간 왜선 ${g.escaped}척(-${g.escaped * 20})` : '') + (g.headHit ? ` · 거북선 피격으로 ${Math.floor(g.t)}초에 종료` : ` · 거북선 무사 +${SAFE_BONUS}`) });
   function side(c, key, rowR, colR, rowL, colL, x, y, ang, s, o = {}) { const right = Math.cos(ang) >= 0, tilt = clamp(Math.sin(ang) * 0.45, -0.45, 0.45) * (right ? 1 : -1); return Spr.draw(c, key, right ? rowR : rowL, right ? colR : colL, x, y, s, Object.assign({ anchor: 'c', rot: tilt }, o)); }
   // 해안선: 직선 모서리를 잘게 나눠 살짝 구불구불하게 그립니다 (충돌 판정은 단순한 사각형 그대로).
   function coast(c, pts) {
@@ -428,8 +507,19 @@ function gNoryang() {
     c.setLineDash([3, 9]); c.strokeStyle = 'rgba(156,224,184,.55)'; c.beginPath(); c.moveTo(262, DECIDE_Y); c.lineTo(GW, DECIDE_Y); c.stroke(); c.restore();
     txt(c, '▼ 이 선 아래로 몰린 왜선은 관음포를 탈출로로 착각해요', GW - 10, DECIDE_Y - 7, { size: 12, align: 'right', color: '#9CE0B8', stroke: C.ink, sw: 3 });
     const hg = c.createRadialGradient(head.x, head.y, 4, head.x, head.y, 90); hg.addColorStop(0, 'rgba(255,220,150,.28)'); hg.addColorStop(1, 'rgba(255,220,150,0)'); c.fillStyle = hg; c.fillRect(head.x - 90, head.y - 90, 180, 180);
-    if (!side(c, 'shgb', 0, 6, 0, 7, head.x, head.y, head.ang, 0.62)) shipVec(c, head.x, head.y, 0.55, 1, {});
-    txt(c, '대장선', head.x, head.y - 34, { size: 12, align: 'center', color: C.gold2, stroke: C.ink, sw: 3 });
+    if (!g.headHit) {
+      if (!side(c, 'shgb', 0, 6, 0, 7, head.x, head.y, head.ang, 0.62)) shipVec(c, head.x, head.y, 0.55, 1, {});
+      txt(c, '거북선', head.x, head.y - 34, { size: 12, align: 'center', color: C.gold2, stroke: C.ink, sw: 3 });
+    }
+    // 곧 쏠 왜선: 붉은 빛 + 느낌표
+    for (const s of ships) if (s.aim > 0 && !s.sink) { c.fillStyle = `rgba(255,70,50,${0.3 + 0.25 * Math.sin(g.t * 22)})`; c.beginPath(); c.arc(s.x, s.y - 4, 22, 0, 7); c.fill(); txt(c, '!', s.x, s.y - 26, { size: 22, align: 'center', color: '#FF6A55', stroke: C.ink, sw: 4 }); }
+    // 느린 총알: 어둠 속에서도 잘 보이도록 빛나게
+    for (const b of g.bullets) {
+      const sp = Math.hypot(b.vx, b.vy) || 1; c.save(); c.globalAlpha = clamp((B_LIFE - b.t) / 0.6, 0.15, 1);
+      c.strokeStyle = 'rgba(255,200,120,.45)'; c.lineWidth = 4; c.lineCap = 'round'; c.beginPath(); c.moveTo(b.x - b.vx / sp * 18, b.y - b.vy / sp * 18); c.lineTo(b.x, b.y); c.stroke();
+      const bg = c.createRadialGradient(b.x, b.y, 1, b.x, b.y, 13); bg.addColorStop(0, 'rgba(255,240,200,1)'); bg.addColorStop(0.4, 'rgba(255,150,70,.8)'); bg.addColorStop(1, 'rgba(255,90,40,0)');
+      c.fillStyle = bg; c.beginPath(); c.arc(b.x, b.y, 13, 0, 7); c.fill(); c.restore();
+    }
     txt(c, '명 수군(진린)', ming.x, ming.y - 22, { size: 11, align: 'center', color: '#BFD4F2', stroke: C.ink, sw: 3 });
     FX.draw(c, g.fx);
     txt(c, '관음포', (BAY.x0 + BAY.x1) / 2, BAY.y0 + 44, { size: 18, align: 'center', serif: true, w: 900, color: '#F1E9D6', stroke: C.ink, sw: 4 });
@@ -441,10 +531,12 @@ function gNoryang() {
     if (g.escaped) txt(c, `빠져나감 ${g.escaped}`, GW - 14, 28, { size: 18, align: 'right', color: '#FF9A88', stroke: C.ink });
     bar(c, 14, 38, 190, 8, 1 - g.t / DUR, C.gold);
     if (g.t < 6) txt(c, '왜선은 왼쪽 위 탈출로로 달아나려 합니다. 위쪽에서 눌러 초록 선 아래로 몰아내세요!', GW / 2, GH - 46, { size: 15, align: 'center', color: C.por, stroke: C.ink, sw: 4, alpha: clamp(6 - g.t, 0, 1) });
+    if (g.t >= 3 && g.t < 9) txt(c, '왜선의 빛나는 총알에 거북선이 맞으면 즉시 전투 종료! 옆으로 피하세요', GW / 2, GH - 22, { size: 14, align: 'center', color: '#FFB3A3', stroke: C.ink, sw: 4, alpha: clamp(9 - g.t, 0, 1) });
     if (g.t > DUR * 0.8 && g.t < DUR * 0.8 + 3) txt(c, '날이 밝아 옵니다…', GW / 2, 120, { size: 24, align: 'center', serif: true, w: 900, color: '#FFE2C0', stroke: C.ink, sw: 5 });
     if (g.over) {
       const a = clamp(g.overT / 0.7, 0, 1); c.fillStyle = `rgba(8,19,31,${0.72 * a})`; c.fillRect(0, 0, GW, GH);
-      txt(c, '노량의 새벽 — 7년 전쟁의 마지막 싸움', GW / 2, 196, { size: 28, serif: true, w: 900, align: 'center', alpha: a });
+      if (g.headHit) { txt(c, '거북선 피격! 전투 종료', GW / 2, 196, { size: 34, serif: true, w: 900, align: 'center', color: '#FF9A88', alpha: a }); txt(c, `${Math.floor(g.t)}초까지의 전과만 기록됩니다`, GW / 2, 270, { size: 16, align: 'center', color: '#E0E6DF', alpha: a }); }
+      else txt(c, '노량의 새벽 — 7년 전쟁의 마지막 싸움', GW / 2, 196, { size: 28, serif: true, w: 900, align: 'center', alpha: a });
       txt(c, `불태운 왜선 ${g.burned}척 · 관음포에 가둔 왜선 ${g.trapped}척`, GW / 2, 236, { size: 18, align: 'center', color: C.gold2, alpha: a });
     }
   };
